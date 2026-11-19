@@ -1,2 +1,23 @@
+# dependencies & build output (rebuild with `npm install && npm run build`)
 node_modules/
 dist/
+
+# packed tarballs (`npm pack`) — what would be published to npm / installed with `dsh plugin add`
+*.tgz
+
+# logs & debug output
+*.log
+npm-debug.log*
+.npm/
+
+# local env / secrets (DeepSeek API keys etc. must never be committed)
+.env
+.env.*
+
+# editors & OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
