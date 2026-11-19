@@ -1,7 +1,7 @@
 // Companion mode: a tiny dafeiyu that lives next to the input box and reacts to what the agent
 // is doing. Everything here is local (no tokens) and nothing is written to the transcript.
 import { DAFEIYU, artToAnsi } from "./art.js";
-import { t } from "./i18n.js";
+import { td } from "./i18n.js";
 
 // 10x6 px chibi (3 rows). Expressions only swap the eye/cheek rows.
 const BASE = ["..pppppp..", ".peeeeeep.", "eeeaeeaeee", "gedkoodkeg", "gemoooomeg", ".ggoooogg."];
@@ -40,7 +40,7 @@ export const MOODS = {
 };
 
 export const pick = (lines) => lines[Math.floor(Math.random() * lines.length)];
-export const moodLines = (m) => t(`mood.${m}`);
+export const moodLines = (m) => td(`mood.${m}`);
 
 /** Classify a tool call into a mood from its name. */
 export function toolMood(title = "") {
@@ -63,19 +63,19 @@ const fmt = (n) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : n >= 100
  * @returns bubble lines
  */
 export function tokenReport(used, ctx) {
-  const lines = [pick(t("egg.greet"))];
+  const lines = [pick(td("egg.greet"))];
   if (used && used.total > 0) {
-    lines.push(t("egg.ate", { n: fmt(used.total) }));
-    lines.push(t("egg.breakdown", { input: fmt(used.input), cache: fmt(used.cacheRead), output: fmt(used.output), steps: used.steps }));
+    lines.push(td("egg.ate", { n: fmt(used.total) }));
+    lines.push(td("egg.breakdown", { input: fmt(used.input), cache: fmt(used.cacheRead), output: fmt(used.output), steps: used.steps }));
     const cacheRate = used.cacheRead / Math.max(1, used.input + used.cacheRead);
-    if (cacheRate >= 0.7) lines.push(t("egg.cache", { pct: Math.round(cacheRate * 100) }));
+    if (cacheRate >= 0.7) lines.push(td("egg.cache", { pct: Math.round(cacheRate * 100) }));
   } else {
-    lines.push(t("egg.hungry"));
+    lines.push(td("egg.hungry"));
   }
   if (ctx?.size) {
     const pct = Math.round((ctx.used / ctx.size) * 100);
-    const mood = t(pct < 10 ? "egg.tummy.lt10" : pct < 50 ? "egg.tummy.lt50" : pct < 80 ? "egg.tummy.lt80" : "egg.tummy.full");
-    lines.push(t("egg.tummy", { used: fmt(ctx.used), size: fmt(ctx.size), pct, mood }));
+    const mood = td(pct < 10 ? "egg.tummy.lt10" : pct < 50 ? "egg.tummy.lt50" : pct < 80 ? "egg.tummy.lt80" : "egg.tummy.full");
+    lines.push(td("egg.tummy", { used: fmt(ctx.used), size: fmt(ctx.size), pct, mood }));
   }
   return lines;
 }

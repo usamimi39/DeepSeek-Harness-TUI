@@ -65,6 +65,8 @@ const en = {
   "thinking.toggled": "Show full thinking: {state} (applies from now on)",
   "language.title": "Language",
   "language.set": "Language: {name}",
+  "dafeiyu.langTitle": "dafeiyu's language",
+  "egg.langSet": "dafeiyu will speak English now!",
 
   "perm.title": "Allow this operation?",
   "perm.footer": "↑↓ / number keys to select · Enter to confirm · Esc to reject",
@@ -205,6 +207,8 @@ const ja = {
   "thinking.toggled": "思考過程の全文表示: {state}（これ以降の表示に反映）",
   "language.title": "言語 / Language",
   "language.set": "表示言語: {name}",
+  "dafeiyu.langTitle": "dafeiyu の言葉",
+  "egg.langSet": "大肥鱼、日本語でしゃべるね！",
 
   "perm.title": "この操作を実行してもいいですか？",
   "perm.footer": "↑↓ / 数字キーで選択・Enter で決定・Esc で拒否",
@@ -285,11 +289,55 @@ Options:
   "mood.bye": ["またね〜", "ばいばい！"],
 };
 
-const DICTS = { en, ja };
+
+// dafeiyu's own lines in Chinese (/dafeiyu-lang). Only egg.* and mood.* are needed here.
+const zh = {
+  "egg.greet": ["大肥鱼来啦！叫我吗？", "嗨嗨，我是大肥鱼~", "怎么啦？"],
+  "egg.ate": "这个会话我吃了 {n} 个 token！",
+  "egg.breakdown": "输入 {input} · 缓存 {cache} · 输出 {output}（{steps} 步）",
+  "egg.cache": "缓存命中 {pct}%，好省钱♪",
+  "egg.hungry": "还什么都没吃呢~ 好饿…",
+  "egg.tummy": "肚子：{used} / {size}（{pct}%） {mood}",
+  "egg.tummy.lt10": "还能吃好多！",
+  "egg.tummy.lt50": "刚刚好~",
+  "egg.tummy.lt80": "有点饱了…",
+  "egg.tummy.full": "吃不下了啦… 帮我 /clear 一下嘛",
+  "egg.nom": " 吧唧吧唧… {n} 个 token，谢谢款待",
+  "egg.langSet": "大肥鱼会说中文啦！",
+  "mood.hello": ["大肥鱼来啦！陪你一会儿", "嗨~ 我来帮忙！"],
+  "mood.thinking": ["嗯嗯…", "交给我吧！", "思考中~", "让我想想…"],
+  "mood.command": ["敲个命令", "嘿！", "执行~！"],
+  "mood.search": ["我去找找！", "在哪儿呢~", "看看文件"],
+  "mood.edit": ["写写写…", "在改了", "稍微改一下"],
+  "mood.working": ["努力中！", "干活中~"],
+  "mood.oops": ["哎呀，失败了", "不行…再来一次！", "唔，报错了"],
+  "mood.waiting": ["这个可以执行吗？", "请确认一下！", "怎么办…？"],
+  "mood.success": ["辛苦啦！", "完成啦~！", "搞定！"],
+  "mood.cancelled": ["停下了", "好的，停止"],
+  "mood.error": ["呜呜，出错了…", "好像不太对…"],
+  "mood.sleepy": ["哈啊…", "zzz…"],
+  "mood.bye": ["拜拜~", "再见！"],
+};
+
+const DICTS = { en, ja, zh };
 let current = "en";
+let dafeiyu; // dafeiyu's language; undefined = follow the UI language
+
+/** Languages dafeiyu can speak (/dafeiyu-lang). */
+export const DAFEIYU_LANGUAGES = [
+  { code: "ja", name: "日本語" },
+  { code: "en", name: "English" },
+  { code: "zh", name: "中文" },
+];
 
 export function setLanguage(code) {
-  current = DICTS[code] ? code : "en";
+  current = code === "en" || code === "ja" ? code : "en";
+}
+export function setDafeiyuLanguage(code) {
+  dafeiyu = DICTS[code] ? code : undefined;
+}
+export function getDafeiyuLanguage() {
+  return dafeiyu ?? current;
 }
 export function getLanguage() {
   return current;
@@ -297,7 +345,16 @@ export function getLanguage() {
 
 /** Look up a UI string; falls back to English, then to the key itself. */
 export function t(key, vars) {
-  const v = DICTS[current][key] ?? en[key] ?? key;
+  return lookup(current, key, vars);
+}
+
+/** Same as t(), in dafeiyu's language. */
+export function td(key, vars) {
+  return lookup(getDafeiyuLanguage(), key, vars);
+}
+
+function lookup(lang, key, vars) {
+  const v = DICTS[lang][key] ?? en[key] ?? key;
   if (Array.isArray(v) || !vars) return v;
   return v.replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined ? String(vars[k]) : m));
 }

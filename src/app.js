@@ -5,7 +5,7 @@ import { renderMarkdown } from "./markdown.js";
 import { listSessionMeta, loadHistory, sessionUsage } from "./sessions.js";
 import { preferredConfig, savePrefs } from "./prefs.js";
 import { ruleKey, dangerReason } from "./approval.js";
-import { t, LANGUAGES, getLanguage, setLanguage } from "./i18n.js";
+import { t, td, LANGUAGES, DAFEIYU_LANGUAGES, getLanguage, setLanguage, getDafeiyuLanguage, setDafeiyuLanguage } from "./i18n.js";
 import { FACES, MOODS, SPRITE_COLS, PORTRAIT, pick, moodLines, toolMood, tokenReport } from "./companion.js";
 import { WHALE, artToAnsi } from "./art.js";
 
@@ -740,6 +740,21 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
               savePrefs({ language: o.value });
               setLang(o.value);
               info(t("language.set", { name: o.label }));
+            },
+          });
+          return;
+        }
+        case "/dafeiyu-lang": {
+          // hidden, like /dafeiyu: which language dafeiyu speaks, independent of the UI
+          const current = getDafeiyuLanguage();
+          setPicker({
+            title: t("dafeiyu.langTitle"),
+            options: DAFEIYU_LANGUAGES.map((l) => ({ label: l.name, value: l.code })),
+            selected: Math.max(0, DAFEIYU_LANGUAGES.findIndex((l) => l.code === current)),
+            onPick: (o) => {
+              setDafeiyuLanguage(o.value);
+              savePrefs({ dafeiyuLanguage: o.value });
+              push({ kind: "portrait", lines: [td("egg.langSet")], maxWidth: Math.max(24, (stdout.columns || 80) - 32) });
             },
           });
           return;

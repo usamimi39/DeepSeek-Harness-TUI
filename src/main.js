@@ -3,10 +3,12 @@ import React from "react";
 import { render } from "ink";
 import { AcpAgent, workspaceCwd, platformLabel } from "./agent.js";
 import { App } from "./app.js";
-import { t, setLanguage } from "./i18n.js";
+import { t, setLanguage, setDafeiyuLanguage } from "./i18n.js";
 import { loadPrefs } from "./prefs.js";
 
-setLanguage(loadPrefs().language ?? "en");
+const prefs = loadPrefs();
+setLanguage(prefs.language ?? "en");
+setDafeiyuLanguage(prefs.dafeiyuLanguage);
 
 
 
