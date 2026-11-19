@@ -4,6 +4,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
+import { t } from "./i18n.js";
 
 const IS_WIN = process.platform === "win32";
 const IS_WSL = !IS_WIN && process.platform === "linux" && /microsoft/i.test(safeRead("/proc/version"));
@@ -35,7 +36,7 @@ export function locateHarness() {
       }).trim();
       dirWin = `${local}\\Programs\\DeepSeek Harness`;
     } else {
-      throw new Error("deepseek は Windows か WSL で動かしてください（DeepSeek Harness は Windows アプリです）");
+      throw new Error(t("agent.unsupportedOs"));
     }
   }
   const sep = "\\";
@@ -43,7 +44,7 @@ export function locateHarness() {
   const cliWin = [dirWin, "resources", "app.asar", "dsh", "node_modules", "@deepseek-ai", "dsh-desktop-host", "lib", "cli.js"].join(sep);
   const exeSpawn = IS_WIN ? exeWin : wslpath("-u", exeWin);
   if (!existsSync(exeSpawn)) {
-    throw new Error(`DeepSeek Harness が見つかりません: ${exeWin}\n環境変数 DEEPSEEK_TUI_HARNESS_DIR でインストール先を指定できます`);
+    throw new Error(t("agent.notFound", { path: exeWin }));
   }
   return { exeSpawn, cliWin };
 }
@@ -115,7 +116,7 @@ export class AcpAgent extends EventEmitter {
     this.child.on("error", (err) => this.#fail(err));
     this.child.on("exit", (code) => {
       this.closed = true;
-      this.#fail(new Error(`dsh が終了しました (code ${code})\n${this.stderrTail.slice(-10).join("\n")}`));
+      this.#fail(new Error(t("dsh.exitedCode", { code, tail: this.stderrTail.slice(-10).join("\n") })));
       this.emit("exit", code);
     });
   }

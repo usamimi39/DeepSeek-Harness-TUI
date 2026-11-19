@@ -3,19 +3,12 @@ import React from "react";
 import { render } from "ink";
 import { AcpAgent, workspaceCwd, platformLabel } from "./agent.js";
 import { App } from "./app.js";
+import { t, setLanguage } from "./i18n.js";
+import { loadPrefs } from "./prefs.js";
 
-const HELP = `deepseek — DeepSeek Harness TUI: DeepSeek Harness を Claude Code みたいにターミナルで使う
+setLanguage(loadPrefs().language ?? "en");
 
-Usage:
-  deepseek [options] [prompt]
 
-Options:
-  -c, --continue               このディレクトリの最新セッションを再開
-  -r, --resume <id>            指定したセッションを再開（TUI 内なら /resume で一覧から選べる）
-      --permission-mode <mode> read-only | workspace-write (default) | danger-full-access
-  -h, --help                   このヘルプ
-
-カレントディレクトリがワークスペースになります。Windows と WSL のどちらからでも使えます。`;
 
 let args;
 try {
@@ -25,27 +18,25 @@ try {
       continue: { type: "boolean", short: "c" },
       resume: { type: "string", short: "r" },
       "permission-mode": { type: "string" },
+      auto: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
 } catch (e) {
-  console.error(e.message + "\n\n" + HELP);
+  console.error(e.message + "\n\n" + t("cli.help"));
   process.exit(2);
 }
 if (args.values.help) {
-  console.log(HELP);
+  console.log(t("cli.help"));
   process.exit(0);
 }
 const mode = args.values["permission-mode"];
 if (mode && !["read-only", "workspace-write", "danger-full-access"].includes(mode)) {
-  console.error(`不明な permission mode: ${mode}`);
+  console.error(t("cli.badMode", { mode }));
   process.exit(2);
 }
 if (!process.stdin.isTTY) {
-  console.error(
-    "deepseek は対話的なターミナルで起動してください（stdin が TTY ではありません）。\n" +
-      "非対話で使うなら: dsh headless \"タスク\"",
-  );
+  console.error(t("cli.notTty"));
   process.exit(1);
 }
 
@@ -72,6 +63,7 @@ const app = render(
     resumeId: args.values.resume,
     continueLast: args.values.continue,
     permissionMode: mode,
+    initialAuto: Boolean(args.values.auto),
   }),
   { exitOnCtrlC: false },
 );

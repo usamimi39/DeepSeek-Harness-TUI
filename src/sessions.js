@@ -4,6 +4,7 @@ import zlib from "node:zlib";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dshHomeLocal } from "./agent.js";
+import { t } from "./i18n.js";
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 
@@ -55,10 +56,10 @@ async function readEvents(id) {
 
 function ago(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);
-  if (s < 60) return "たった今";
-  if (s < 3600) return `${Math.floor(s / 60)}分前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}時間前`;
-  return `${Math.floor(s / 86400)}日前`;
+  if (s < 60) return t("ago.now");
+  if (s < 3600) return t("ago.min", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("ago.hour", { n: Math.floor(s / 3600) });
+  return t("ago.day", { n: Math.floor(s / 86400) });
 }
 
 /** { [id]: { label } } — title, relative time, and message count for /resume. */
@@ -71,10 +72,10 @@ export async function listSessionMeta(ids) {
         if (!ev.length) return;
         const title = ev.filter((e) => e.type === "session/title").at(-1)?.data?.title;
         const firstUser = ev.find((e) => e.type === "user/message" && e.data?.source?.kind === "user");
-        const text = title ?? firstUser?.data?.content?.find((c) => c.type === "text")?.text ?? "(無題)";
+        const text = title ?? firstUser?.data?.content?.find((c) => c.type === "text")?.text ?? t("session.untitled");
         const users = ev.filter((e) => e.type === "user/message" && e.data?.source?.kind === "user").length;
         const last = ev.at(-1)?.time ?? ev[0].createdAt;
-        out[id] = { label: `${text.replace(/\s+/g, " ").slice(0, 50)}  · ${ago(last)} · ${users}件` };
+        out[id] = { label: `${text.replace(/\s+/g, " ").slice(0, 50)}  · ${ago(last)} · ${t("session.messages", { n: users })}` };
       } catch {}
     }),
   );

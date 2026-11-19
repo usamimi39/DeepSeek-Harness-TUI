@@ -4,7 +4,9 @@ import stringWidth from "string-width";
 import { renderMarkdown } from "./markdown.js";
 import { listSessionMeta, loadHistory, sessionUsage } from "./sessions.js";
 import { preferredConfig, savePrefs } from "./prefs.js";
-import { FACES, MOODS, SPRITE_COLS, PORTRAIT, pick, toolMood, tokenReport } from "./companion.js";
+import { ruleKey, dangerReason } from "./approval.js";
+import { t, LANGUAGES, getLanguage, setLanguage } from "./i18n.js";
+import { FACES, MOODS, SPRITE_COLS, PORTRAIT, pick, moodLines, toolMood, tokenReport } from "./companion.js";
 import { WHALE, artToAnsi } from "./art.js";
 
 const h = React.createElement;
@@ -12,14 +14,15 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 const ACCENT = "#4D6BFE"; // DeepSeek blue
 
 const COMMANDS = [
-  { name: "/help", desc: "コマンドとショートカットの一覧" },
-  { name: "/clear", desc: "画面を消して新しいセッションを開始" },
-  { name: "/resume", desc: "このディレクトリの過去セッションを再開" },
-  { name: "/model", desc: "モデルを切り替え" },
-  { name: "/effort", desc: "推論の強さ (reasoning effort) を切り替え" },
-  { name: "/thinking", desc: "思考過程の表示 ON/OFF" },
-  { name: "/status", desc: "セッション情報を表示" },
-  { name: "/exit", desc: "終了" },
+  { name: "/help" },
+  { name: "/clear" },
+  { name: "/resume" },
+  { name: "/model" },
+  { name: "/effort" },
+  { name: "/thinking" },
+  { name: "/status" },
+  { name: "/language" },
+  { name: "/exit" },
 ];
 
 let idSeq = 0;
@@ -152,7 +155,7 @@ function Item({ item, showThinking }) {
         h(
           Box,
           { marginTop: 1 },
-          h(Text, { dimColor: true }, "▎ /help でコマンド一覧 · Esc で中断 · \\+Enter で改行 · Ctrl+C×2 で終了"),
+          h(Text, { dimColor: true }, t("banner.tips")),
         ),
       );
     case "portrait":
@@ -183,7 +186,7 @@ function Item({ item, showThinking }) {
         Box,
         { marginBottom: 1, flexDirection: "column" },
         h(Text, { dimColor: true, italic: true }, `✻ ${shown.join("\n  ")}`),
-        more > 0 ? h(Text, { dimColor: true }, `  … +${more} 行 (/thinking で全文表示)`) : null,
+        more > 0 ? h(Text, { dimColor: true }, t("thought.more", { n: more })) : null,
       );
     }
     case "tool": {
@@ -196,10 +199,16 @@ function Item({ item, showThinking }) {
         h(
           Bullet,
           { color },
-          h(Text, null, h(Text, { bold: true }, item.title), item.summary ? h(Text, { dimColor: true }, `(${item.summary})`) : null),
+          h(
+            Text,
+            null,
+            h(Text, { bold: true }, item.title),
+            item.summary ? h(Text, { dimColor: true }, `(${item.summary})`) : null,
+            item.approvedBy ? h(Text, { color: "yellow", dimColor: true }, ` · ${t(`approved.${item.approvedBy}`)}`) : null,
+          ),
         ),
         item.status === "in_progress"
-          ? h(Text, { dimColor: true }, "  ⎿  実行中…")
+          ? h(Text, { dimColor: true }, t("tool.running"))
           : preview.length
             ? h(
                 Box,
@@ -209,14 +218,14 @@ function Item({ item, showThinking }) {
                   Box,
                   { flexDirection: "column", flexGrow: 1 },
                   h(Text, { dimColor: item.status !== "failed", color: item.status === "failed" ? "red" : undefined }, preview.join("\n")),
-                  lines.length > 4 ? h(Text, { dimColor: true }, `… +${lines.length - 4} 行`) : null,
+                  lines.length > 4 ? h(Text, { dimColor: true }, t("tool.more", { n: lines.length - 4 })) : null,
                 ),
               )
-            : h(Text, { dimColor: true }, "  ⎿  (出力なし)"),
+            : h(Text, { dimColor: true }, t("tool.noOutput")),
       );
     }
     case "info":
-      return h(Box, { marginBottom: 1 }, h(Text, { dimColor: true }, `  ${item.text}`));
+      return h(Box, { marginBottom: 1 }, h(Text, { dimColor: true }, item.text.replace(/^/gm, "  ")));
     case "error":
       return h(Box, { marginBottom: 1 }, h(Text, { color: "red" }, `✗ ${item.text}`));
     default:
@@ -241,7 +250,7 @@ function Selector({ title, body, options, selected, color = ACCENT, footer }) {
         o.hint && i === selected ? h(Text, { dimColor: true }, `  ${oneLine(o.hint, 60)}`) : null,
       ),
     ),
-    h(Text, { dimColor: true }, footer ?? "↑↓ で選択・Enter で決定・Esc でキャンセル"),
+    h(Text, { dimColor: true }, footer ?? t("picker.footer")),
   );
 }
 
@@ -299,12 +308,19 @@ function InputBox({ layout, busy, width }) {
 }
 
 // ---------- app ----------
-export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permissionMode }) {
+export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permissionMode, initialAuto = false }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [cols, setCols] = useState(stdout.columns || 80);
   const [rows, setRows] = useState(stdout.rows || 24);
   const staticCountRef = useRef(0); // how many items have been handed to <Static>
+
+  // ---- approval mode: "ask" (default) or "auto" (approve everything except dangerReason()) ----
+  const [, setLang] = useState(getLanguage());
+  const [approvalMode, setApprovalMode] = useState(initialAuto ? "auto" : "ask");
+  const approvalModeRef = useRef(approvalMode);
+  approvalModeRef.current = approvalMode;
+  const sessionRulesRef = useRef(new Set()); // "don't ask again" keys, reset per session
 
   // ---- companion (dafeiyu) ----
   // Companion mode (dafeiyu living next to the input) is shelved: only DEEPSEEK_TUI_COMPANION=1 enables it.
@@ -322,7 +338,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
     if (!companionRef.current) return;
     lastActivityRef.current = Date.now();
     setMood(m);
-    if (text || lastMoodRef.current !== m) setBubble(text ?? pick(MOODS[m]?.lines ?? [""]));
+    if (text || lastMoodRef.current !== m) setBubble(text ?? pick(moodLines(m)));
     lastMoodRef.current = m;
     clearTimeout(bubbleTimerRef.current);
     if (ttl)
@@ -345,7 +361,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
         if (Date.now() - lastActivityRef.current > 90_000 && lastMoodRef.current !== "sleepy") {
           lastMoodRef.current = "sleepy";
           setMood("sleepy");
-          setBubble(pick(MOODS.sleepy.lines));
+          setBubble(pick(moodLines("sleepy")));
           clearTimeout(bubbleTimerRef.current);
           bubbleTimerRef.current = setTimeout(() => setBubble(null), 4000);
         }
@@ -468,7 +484,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
           push({
             kind: "info",
             text:
-              "計画:\n" +
+              t("plan.title") + "\n" +
               (update.entries ?? []).map((e) => `  ${e.status === "completed" ? "☒" : "☐"} ${e.content}`).join("\n"),
           });
           break;
@@ -478,12 +494,28 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
     };
     const onPermission = (params, respond) => {
       const tool = itemsRef.current.find((it) => it.kind === "tool" && it.toolCallId === params.toolCall?.toolCallId);
-      setPermission({ params, respond, selected: 0, tool });
+      const key = ruleKey(tool?.title, tool?.rawInput);
+      const danger = dangerReason(tool?.rawInput);
+      const allow = (params.options ?? []).find((o) => o.kind?.startsWith("allow"));
+      const byRule = sessionRulesRef.current.has(key);
+      if (allow && !danger && (byRule || approvalModeRef.current === "auto")) {
+        respond({ outcome: { outcome: "selected", optionId: allow.optionId } });
+        const note = byRule ? "rule" : "auto";
+        setItems((xs) => xs.map((it) => (it.kind === "tool" && it.toolCallId === tool?.toolCallId ? { ...it, approvedBy: note } : it)));
+        return;
+      }
+      // DSH offers allow-once / reject-once; add our own session-wide "don't ask again" after allow.
+      const choices = [];
+      for (const o of params.options ?? []) {
+        choices.push(o);
+        if (o === allow && !danger) choices.push({ session: true, optionId: allow.optionId, kind: "allow_session" });
+      }
+      setPermission({ params, respond, selected: 0, tool, key, danger, choices });
       say("waiting");
     };
     const onExit = () => {
       setBusy(false);
-      error(`dsh プロセスが終了しました。\n${agent.stderrTail.slice(-8).join("\n")}`);
+      error(t("dsh.exited", { tail: agent.stderrTail.slice(-8).join("\n") }));
     };
     agent.on("update", onUpdate);
     agent.on("permission", onPermission);
@@ -507,12 +539,12 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
         if (res?.stopReason === "cancelled") say("cancelled", { ttl: 5000 });
         else {
           const ate = (usageRef.current ?? 0) - (usageAtTurnStartRef.current ?? 0);
-          const line = pick(MOODS.success.lines) + (ate > 0 ? ` もぐもぐ… ${fmtTokens(ate)} トークンごちそうさま` : "");
+          const line = pick(moodLines("success")) + (ate > 0 ? t("egg.nom", { n: fmtTokens(ate) }) : "");
           say("success", { ttl: 8000, text: line });
         }
-        if (res?.stopReason === "cancelled") info("⎿ 中断しました");
-        else if (res?.stopReason === "max_tokens") info("⎿ 最大トークン数に達しました");
-        else if (res?.stopReason === "refusal") info("⎿ エージェントが応答を拒否しました");
+        if (res?.stopReason === "cancelled") info(t("stop.cancelled"));
+        else if (res?.stopReason === "max_tokens") info(t("stop.maxTokens"));
+        else if (res?.stopReason === "refusal") info(t("stop.refusal"));
       } catch (e) {
         error(e.message);
         say("error", { ttl: 8000 });
@@ -540,6 +572,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
   );
 
   const startNewSession = useCallback(async () => {
+    sessionRulesRef.current = new Set();
     const res = await agent.newSession(cwd);
     sessionRef.current = res.sessionId;
     setUsage(null);
@@ -549,6 +582,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
   const resumeSession = useCallback(
     async (id, { withBanner = false } = {}) => {
       if (sessionRef.current) await agent.closeSession(sessionRef.current).catch(() => {});
+      sessionRulesRef.current = new Set();
       const res = await agent.resumeSession(id, cwd);
       sessionRef.current = id;
       setUsage(null);
@@ -558,7 +592,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
         ...xs,
         ...(withBanner ? [makeBanner(cwd, opts)] : []),
         ...history.map((it) => ({ id: nid(), ...it, ...(it.kind === "tool" ? { summary: summarizeInput(it.rawInput) } : {}) })),
-        { id: nid(), kind: "info", text: `── セッション ${id} を再開しました ──` },
+        { id: nid(), kind: "info", text: t("resume.done", { id }) },
       ]);
     },
     [agent, cwd, applyPrefs],
@@ -574,7 +608,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
         if (continueLast) {
           const list = await agent.listSessions(cwd);
           target = list.sessions?.[0]?.sessionId;
-          if (!target) notice = "このディレクトリに再開できるセッションがないので、新しく始めます";
+          if (!target) notice = t("resume.noneToContinue");
         }
         if (target) await resumeSession(target, { withBanner: true });
         else push(makeBanner(cwd, await startNewSession()));
@@ -588,7 +622,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
       } catch (e) {
         setBooting(false);
         push(makeBanner(cwd, null));
-        error(`起動に失敗しました: ${e.message}`);
+        error(t("boot.failed", { msg: e.message }));
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -603,14 +637,14 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
     setTimeout(() => {
       agent.dispose();
       exit();
-      if (id) setTimeout(() => process.stdout.write(`再開するには: deepseek --resume ${id}\n`), 50);
+      if (id) setTimeout(() => process.stdout.write(t("exit.resume", { id }) + "\n"), 50);
     }, 30);
   }, [agent, exit]);
 
   const openConfigPicker = useCallback(
     (category, title) => {
       const opt = configOptions?.find((o) => o.category === category);
-      if (!opt) return info("この設定は利用できません");
+      if (!opt) return info(t("config.unavailable"));
       const options = flattenOptions(opt);
       const selected = Math.max(0, options.findIndex((o) => o.value === opt.currentValue));
       setPicker({
@@ -622,7 +656,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
             const res = await agent.setConfig(sessionRef.current, opt.id, o.value);
             setConfigOptions(res.configOptions ?? configOptions);
             savePrefs(category === "model" ? { model: o.value } : { effort: o.value });
-            info(`${title}: ${o.label}（次回以降のデフォルトにも使います）`);
+            info(t("config.saved", { title, label: o.label }));
           } catch (e) {
             error(e.message);
           }
@@ -642,18 +676,15 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
         case "/help":
           return info(
             [
-              "コマンド:",
-              ...COMMANDS.map((c) => `  ${c.name.padEnd(10)} ${c.desc}`),
+              t("help.commands"),
+              ...COMMANDS.map((c) => `  ${c.name.padEnd(10)} ${t(`cmd.${c.name}`)}`),
               "",
-              "ショートカット:",
-              "  Enter      送信          \\ + Enter  改行",
-              "  Esc        実行中なら中断 / 入力をクリア",
-              "  ↑ / ↓      入力履歴",
-              "  Ctrl+C×2   終了          Ctrl+U  行をクリア",
+              t("help.shortcuts"),
+              ...t("help.keys"),
             ].join("\n"),
           );
         case "/clear": {
-          if (busy) return info("実行中は /clear できません（Esc で中断してから）");
+          if (busy) return info(t("clear.busy"));
           if (sessionRef.current) await agent.closeSession(sessionRef.current).catch(() => {});
           // Clear and start again from the top row; the dynamic region fills the rest of the
           // screen so the banner sits at the top and the input stays pinned to the bottom.
@@ -671,14 +702,14 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
           return;
         }
         case "/resume": {
-          if (busy) return info("実行中は /resume できません");
+          if (busy) return info(t("resume.busy"));
           try {
             const list = await agent.listSessions(cwd);
             const ids = (list.sessions ?? []).map((s) => s.sessionId).filter((id) => id !== sessionRef.current);
-            if (!ids.length) return info("このディレクトリに再開できるセッションはありません");
+            if (!ids.length) return info(t("resume.empty"));
             const meta = await listSessionMeta(ids);
             setPicker({
-              title: "再開するセッションを選んでください",
+              title: t("resume.pick"),
               options: ids.slice(0, 20).map((id) => ({
                 label: meta[id]?.label ?? id,
                 hint: id,
@@ -698,13 +729,28 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
           push({ kind: "portrait", lines: tokenReport(used, usage), maxWidth: Math.max(24, (stdout.columns || 80) - 32) });
           return;
         }
+        case "/language": {
+          const current = getLanguage();
+          setPicker({
+            title: t("language.title"),
+            options: LANGUAGES.map((l) => ({ label: l.name, value: l.code })),
+            selected: Math.max(0, LANGUAGES.findIndex((l) => l.code === current)),
+            onPick: (o) => {
+              setLanguage(o.value);
+              savePrefs({ language: o.value });
+              setLang(o.value);
+              info(t("language.set", { name: o.label }));
+            },
+          });
+          return;
+        }
         case "/model":
-          return openConfigPicker("model", "モデル");
+          return openConfigPicker("model", t("title.model"));
         case "/effort":
-          return openConfigPicker("thought_level", "推論の強さ");
+          return openConfigPicker("thought_level", t("title.effort"));
         case "/thinking":
           setShowThinking((v) => !v);
-          return info(`思考過程の全文表示: ${showThinking ? "OFF" : "ON"}（これ以降の表示に反映）`);
+          return info(t("thinking.toggled", { state: showThinking ? "OFF" : "ON" }));
         case "/status":
           return info(
             [
@@ -734,7 +780,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
       const handled = await handleCommand(text);
       if (handled !== false) return;
     }
-    if (busy || booting) return info("まだ前の処理が終わっていません（Esc で中断できます）");
+    if (busy || booting) return info(t("busy.wait"));
     push({ kind: "user", text });
     runPrompt(text);
   }, [busy, booting, handleCommand, push, runPrompt, info, setEd]);
@@ -745,9 +791,10 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
   useInput((ch, key) => {
     // --- permission prompt ---
     if (permission) {
-      const opts = permission.params.options ?? [];
+      const opts = permission.choices;
       const choose = (i) => {
         const o = opts[i];
+        if (o.session) sessionRulesRef.current.add(permission.key);
         permission.respond({ outcome: { outcome: "selected", optionId: o.optionId } });
         setPermission(null);
         say(o.kind?.startsWith("allow") ? "working" : "cancelled");
@@ -804,7 +851,7 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
       const now = Date.now();
       if (now - ctrlCRef.current < 1500) return doExit();
       ctrlCRef.current = now;
-      setHint("もう一度 Ctrl+C で終了");
+      setHint(t("ctrlc.again"));
       setTimeout(() => setHint(""), 1500);
       return;
     }
@@ -829,6 +876,10 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
         return;
       }
       submit();
+      return;
+    }
+    if (key.tab && key.shift) {
+      setApprovalMode((m) => (m === "auto" ? "ask" : "auto"));
       return;
     }
     if (key.tab) {
@@ -956,25 +1007,33 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
 
   let permissionBox = null;
   if (permission) {
-    const t = permission.tool;
+    const tl = permission.tool;
     const body = [
-      h(Text, { key: "t", bold: true }, t?.title ?? "ツール"),
-      t?.rawInput !== undefined
+      h(Text, { key: "t", bold: true }, tl?.title ?? t("tool.generic")),
+      tl?.rawInput !== undefined
         ? h(
             Text,
             { key: "i", dimColor: true },
-            typeof t.rawInput === "string" ? t.rawInput : JSON.stringify(t.rawInput, null, 2).slice(0, 1500),
+            typeof tl.rawInput === "string" ? tl.rawInput : JSON.stringify(tl.rawInput, null, 2).slice(0, 1500),
           )
         : null,
     ];
-    const labels = { allow_once: "はい（今回だけ許可）", allow_always: "はい（常に許可）", reject_once: "いいえ", reject_always: "いいえ（常に拒否）" };
+    const labels = {
+      allow_once: t("perm.allow_once"),
+      allow_session: t("perm.allow_session", { key: permission.key }),
+      allow_always: t("perm.allow_always"),
+      reject_once: t("perm.reject_once"),
+      reject_always: t("perm.reject_always"),
+    };
+    if (permission.danger)
+      body.push(h(Text, { key: "d", color: "red" }, t("perm.danger", { reason: t(`danger.${permission.danger}`) })));
     permissionBox = h(Selector, {
-      title: "この操作を実行してもいいですか？",
+      title: t("perm.title"),
       body,
       color: "yellow",
-      options: (permission.params.options ?? []).map((o) => ({ label: labels[o.kind] ?? o.name })),
+      options: permission.choices.map((o) => ({ label: labels[o.kind] ?? o.name })),
       selected: permission.selected,
-      footer: "↑↓ / 数字キーで選択・Enter で決定・Esc で拒否",
+      footer: t("perm.footer"),
     });
   }
 
@@ -991,13 +1050,13 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
     { ref: contentRef, flexDirection: "column", flexShrink: 0 },
     ...live.map((it) => h(Item, { key: it.id, item: it, showThinking })),
     booting
-      ? h(Text, { color: ACCENT }, `${SPINNER[tick % SPINNER.length]} DeepSeek Harness を起動中…`)
+      ? h(Text, { color: ACCENT }, `${SPINNER[tick % SPINNER.length]} ${t("boot.spinner")}`)
       : busy && !permission
         ? h(
             Box,
             { marginBottom: 1 },
-            h(Text, { color: ACCENT }, `${SPINNER[tick % SPINNER.length]} 考え中… `),
-            h(Text, { dimColor: true }, `(${elapsed}s · esc で中断)`),
+            h(Text, { color: ACCENT }, `${SPINNER[tick % SPINNER.length]} ${t("busy.spinner")}`),
+            h(Text, { dimColor: true }, t("busy.hint", { s: elapsed })),
           )
         : null,
     // speech bubble, right-aligned so its tail points down at the sprite
@@ -1028,13 +1087,17 @@ export function App({ agent, cwd, initialPrompt, resumeId, continueLast, permiss
           Box,
           { flexDirection: "column", paddingX: 2 },
           ...suggestions.map((c, i) =>
-            h(Text, { key: c.name, color: i === 0 ? ACCENT : undefined, dimColor: i !== 0 }, `${c.name.padEnd(12)}${c.desc}`),
+            h(Text, { key: c.name, color: i === 0 ? ACCENT : undefined, dimColor: i !== 0 }, `${c.name.padEnd(12)}${t(`cmd.${c.name}`)}`),
           ),
         )
       : h(
           Box,
           { paddingX: 2, justifyContent: "space-between", width },
-          h(Text, { dimColor: true }, hint || (permissionMode ? `⏵⏵ ${permissionMode}` : "? /help でヘルプ")),
+          hint
+            ? h(Text, { dimColor: true }, hint)
+            : approvalMode === "auto"
+              ? h(Text, { color: "yellow" }, t("footer.auto"), h(Text, { dimColor: true }, t("footer.autoHint")))
+              : h(Text, { dimColor: true }, permissionMode ? `${permissionMode} · ` : "", t("footer.default")),
           h(
             Text,
             { dimColor: true },
