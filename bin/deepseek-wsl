@@ -1,0 +1,6 @@
+#!/bin/sh
+# WSL launcher: runs the TUI with WSL's node (keeps a real TTY) and lets it
+# spawn the Windows DeepSeek Harness executable through interop.
+# Install: ln -s /mnt/c/Users/<you>/dev/deepseek-harness-tui/bin/deepseek-wsl ~/.local/bin/deepseek
+self=$(readlink -f "$0")
+exec node "$(dirname "$self")/../dist/deepseek.mjs" "$@"

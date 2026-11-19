@@ -1,0 +1,26 @@
+{
+  "name": "deepseek-harness-tui",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness TUI \u2014 a Claude Code-like terminal UI for DeepSeek Harness (over ACP)",
+  "type": "module",
+  "bin": {
+    "deepseek": "dist/deepseek.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true,
+  "dependencies": {
+    "ink": "^6.8.0",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.1",
+    "react": "^19.3.1",
+    "string-width": "^7.2.0"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
+}
